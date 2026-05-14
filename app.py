@@ -41,8 +41,6 @@ st.set_page_config(
 
 # =====================================================================
 # Constantes visuais (paleta + dimensoes da toolbar)
-# Valores ligeiramente menores que no original porque o frame WebRTC
-# costuma chegar em 640x480 (nao 1280x720) na maioria dos navegadores.
 # =====================================================================
 
 TOOLS = [
@@ -238,6 +236,10 @@ class VirtualPaintProcessor:
         self.fps = 0.0
         self._last_t = time.time()
 
+        # Frame skipping — roda MediaPipe so em frames pares
+        self._frame_count = 0
+        self._last_points = None
+
         # Comandos vindos do sidebar (thread-safe via lock)
         self.cmd_clear = False
         self.cmd_select_index = None
@@ -267,8 +269,6 @@ class VirtualPaintProcessor:
             self.canvas[:] = 0
             self._flash("Canvas limpo")
         elif tool["type"] == "save":
-            # No servidor nao ha disco persistente — instruimos o usuario
-            # a usar o botao de download na barra lateral.
             self._flash("Use 'Baixar PNG' na barra lateral")
         else:
             self.selected_index = idx
@@ -300,8 +300,14 @@ class VirtualPaintProcessor:
                 self._apply_tool(self.cmd_select_index)
                 self.cmd_select_index = None
 
-            # Deteccao de mao
-            points = self.detector.find_hand(img)
+            # Deteccao de mao com frame skipping (MediaPipe so em frames pares)
+            self._frame_count += 1
+            if self._frame_count % 2 == 0:
+                points = self.detector.find_hand(img)
+                self._last_points = points
+            else:
+                points = self._last_points
+
             cursor, mode = None, "idle"
 
             if points:
@@ -453,10 +459,10 @@ ctx = webrtc_streamer(
     rtc_configuration=RTC_CONFIG,
     video_processor_factory=VirtualPaintProcessor,
     media_stream_constraints={
-        "video": {"width": {"ideal": 960}, "height": {"ideal": 540}},
+        "video": {"width": {"ideal": 640}, "height": {"ideal": 360}},  # era 960x540
         "audio": False,
     },
-    async_processing=True,
+    async_processing=False,  # era True — evita fila de frames antigos
 )
 
 # Sidebar: controles redundantes (caso o gesto nao funcione) + download
